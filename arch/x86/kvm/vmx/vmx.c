@@ -51,7 +51,7 @@
 #include <asm/vmx.h>
 
 #include <trace/events/ipi.h>
-
+#include <linux/printk.h>
 #include "capabilities.h"
 #include "cpuid.h"
 #include "hyperv.h"
@@ -217,9 +217,11 @@ module_param(ple_window_shrink, uint, 0444);
 static unsigned int ple_window_max        = KVM_VMX_DEFAULT_PLE_WINDOW_MAX;
 module_param(ple_window_max, uint, 0444);
 
-/* Default is SYSTEM mode, 1 for host-guest mode */
+/* Default is SYSTEM mode, 1 for host-guest mode (which is BROKEN) */
 int __read_mostly pt_mode = PT_MODE_SYSTEM;
+#ifdef CONFIG_BROKEN
 module_param(pt_mode, int, S_IRUGO);
+#endif
 
 struct x86_pmu_lbr __ro_after_init vmx_lbr_caps;
 
@@ -3216,7 +3218,7 @@ void vmx_flush_tlb_all(struct kvm_vcpu *vcpu)
 
 static inline int vmx_get_current_vpid(struct kvm_vcpu *vcpu)
 {
-	if (is_guest_mode(vcpu))
+	if (is_guest_mode(vcpu) && nested_cpu_has_vpid(get_vmcs12(vcpu)))
 		return nested_get_vpid02(vcpu);
 	return to_vmx(vcpu)->vpid;
 }
@@ -6446,10 +6448,8 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
  * The guest has exited.  See if we can fix it or if we need userspace
  * assistance.
  */
- 
- /* Add global counters at the top of the file */
-static unsigned long long kvm_exit_counters[256] = {0}; // Array for per-exit-type counters
-static unsigned long long kvm_total_exits = 0;         // Global total exit counter
+static unsigned long long kvm_exit_counters[256] = {0}; 
+static unsigned long long kvm_total_exits = 0;      
 
 /* Add a helper function for human-readable exit reason names */
 static const char *kvm_exit_reason_to_string(int reason) {
@@ -6465,15 +6465,18 @@ static const char *kvm_exit_reason_to_string(int reason) {
     }
 }
 
+
+
 static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 {
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	union vmx_exit_reason exit_reason = vmx->exit_reason;
+	u32 vectoring_info = vmx->idt_vectoring_info;
+	u16 exit_handler_index;
 
- struct vcpu_vmx *vmx = to_vmx(vcpu);
-    union vmx_exit_reason exit_reason = vmx->exit_reason;
-    u32 vectoring_info = vmx->idt_vectoring_info;
-    u16 exit_handler_index;
 
-    /* Add the counters at the start of the function */
+
+	/* Add the counters at the start of the function */
     int exit_type = exit_reason.basic; // Get the exit type number
     kvm_exit_counters[exit_type]++;
     kvm_total_exits++;
@@ -6486,11 +6489,8 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
                 printk(KERN_INFO "KVM Exit: %d (%s) occurred %llu times\n",
                        i, kvm_exit_reason_to_string(i), kvm_exit_counters[i]);
             }
-        
-	struct vcpu_vmx *vmx = to_vmx(vcpu);
-	union vmx_exit_reason exit_reason = vmx->exit_reason;
-	u32 vectoring_info = vmx->idt_vectoring_info;
-	u16 exit_handler_index;
+}
+}
 
 	/*
 	 * Flush logged GPAs PML buffer, this will make dirty_bitmap more
@@ -6663,13 +6663,6 @@ unexpected_vmexit:
 	vcpu->run->internal.data[1] = vcpu->arch.last_vmentry_cpu;
 	return 0;
 }
-
-
-
-
-
-   
-    
 
 int vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 {
